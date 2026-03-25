@@ -1,9 +1,9 @@
 import os
-import sys
 import json
 import shutil
+import argparse
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 import piexif
 
@@ -55,7 +55,8 @@ def get_video_timestamp(path):
         data = json.loads(meta)
         ts = data.get("format", {}).get("tags", {}).get("creation_time")
         if ts:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00")), "QuickTimeCreationTime"
+            dt_utc = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return dt_utc.astimezone().replace(tzinfo=None), "QuickTimeCreationTime"
     except Exception:
         pass
     return None, None
@@ -88,6 +89,7 @@ def convert_to_h264_mp4(path):
             "-i", path,
             "-map", "0:v:0",
             "-map", "0:a?",
+            "-map_metadata", "0",
             "-c:v", "libx264",
             "-crf", "24",
             "-preset", "fast",
@@ -129,7 +131,7 @@ def safe_rename(path, new_name, directory):
     return candidate
 
 # ---------- Main pipeline ----------
-def main(directory="."):
+def main(directory=".", shift_hours=0):
     for name in sorted(os.listdir(directory)):
         path = os.path.join(directory, name)
         if not os.path.isfile(path):
@@ -151,6 +153,8 @@ def main(directory="."):
 
         # Rename file using best available timestamp
         dt, source = get_best_timestamp(path)
+        if shift_hours:
+            dt += timedelta(hours=shift_hours)
         new_name = dt.strftime("%Y-%m-%d %H:%M:%S") + ext
         if name == new_name:
             continue
@@ -158,5 +162,9 @@ def main(directory="."):
         print(f"{name} → {final_name} [{source}]")
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "."
-    main(target)
+    parser = argparse.ArgumentParser(description="Rename pictures/videos by timestamp.")
+    parser.add_argument("directory", nargs="?", default=".", help="Target directory")
+    parser.add_argument("--shift-by", type=float, default=0, dest="shift_hours",
+                        help="Shift all timestamps by this many hours (e.g. --shift-by=-5)")
+    args = parser.parse_args()
+    main(args.directory, args.shift_hours)
