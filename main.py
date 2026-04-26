@@ -194,7 +194,7 @@ def safe_rename(path, new_name, directory):
     base, ext = os.path.splitext(new_name)
     counter = 1
     candidate = new_name
-    while os.path.exists(candidate):
+    while os.path.exists(os.path.join(directory, candidate)):
         candidate = f"{base}-{counter}{ext}"
         counter += 1
 
