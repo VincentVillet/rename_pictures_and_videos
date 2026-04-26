@@ -353,6 +353,8 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
                 dt, source = get_best_timestamp(path)
             if shift_hours:
                 dt += timedelta(hours=shift_hours)
+            if filename_dt is not None:
+                skip_rename = True
 
         new_name = dt.strftime("%Y-%m-%d %H:%M:%S") + ext
         if not skip_rename and name != new_name:
