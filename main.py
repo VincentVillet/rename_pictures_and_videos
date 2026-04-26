@@ -233,7 +233,18 @@ def safe_rename(path, new_name, directory):
     base, ext = os.path.splitext(new_name)
     counter = 1
     candidate = new_name
-    while os.path.exists(os.path.join(directory, candidate)):
+    while True:
+        target = os.path.join(directory, candidate)
+        if not os.path.exists(target):
+            break
+        # On case-insensitive filesystems (macOS APFS default), the source
+        # file's own path can match the lowercase target — that's not a real
+        # collision, just a case change.
+        try:
+            if os.path.samefile(target, path):
+                break
+        except OSError:
+            pass
         candidate = f"{base}-{counter}{ext}"
         counter += 1
 
