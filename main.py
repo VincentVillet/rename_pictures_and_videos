@@ -174,7 +174,7 @@ def burn_timestamp(path, dt):
     bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
-    x = w - tw - padding - bbox[0]
+    x = (w - tw) // 2 - bbox[0]
     y = h - th - padding - bbox[1]
 
     draw.text((x, y), text, font=font, fill="white",
@@ -294,8 +294,15 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
         skip_rename = False
         filename_dt = parse_date_from_filename(name) if ext in IMAGE_EXTS else None
         exif_dt, exif_src = (get_image_timestamp(path) if filename_dt is not None else (None, None))
-        conflict = filename_dt is not None and exif_dt != filename_dt
-        if conflict:
+        if filename_dt is not None and exif_dt is None:
+            try:
+                write_exif_datetime(path, filename_dt)
+                print(f"{name} [EXIF set from filename: {filename_dt.strftime('%Y-%m-%d %H:%M:%S')}]")
+            except Exception as e:
+                print(f"{name} [EXIF write failed: {e}]")
+            dt, source = filename_dt, "FilenameTimestamp"
+            skip_rename = True
+        elif filename_dt is not None and exif_dt != filename_dt:
             print(f"\n'{name}' already has a timestamp in its filename.")
             print(f"  filename: {filename_dt.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"  EXIF:     {exif_dt.strftime('%Y-%m-%d %H:%M:%S') if exif_dt else '(none)'}")
