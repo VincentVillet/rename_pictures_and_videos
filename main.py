@@ -211,12 +211,17 @@ def parse_date_from_filename(name):
         return None
 
 def write_exif_datetime(path, dt):
-    """Write dt to DateTimeOriginal/Digitized/DateTime EXIF tags. JPEG/TIFF only."""
+    """Write dt to DateTimeOriginal/Digitized/DateTime EXIF tags. JPEG/TIFF only.
+
+    Writes to a sibling tempfile and atomically replaces the original only on
+    success — any error leaves the original file untouched.
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext not in (".jpg", ".jpeg", ".tiff"):
         raise ValueError(f"EXIF write not supported for {ext}")
-    img = Image.open(path)
-    exif_bytes = img.info.get("exif")
+
+    with Image.open(path) as img:
+        exif_bytes = img.info.get("exif")
     if exif_bytes:
         exif_dict = piexif.load(exif_bytes)
     else:
@@ -225,7 +230,20 @@ def write_exif_datetime(path, dt):
     exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = ts
     exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = ts
     exif_dict["0th"][piexif.ImageIFD.DateTime] = ts
-    piexif.insert(piexif.dump(exif_dict), path)
+    new_exif_bytes = piexif.dump(exif_dict)
+
+    tmp_path = path + ".tmp_exif"
+    try:
+        shutil.copy2(path, tmp_path)
+        piexif.insert(new_exif_bytes, tmp_path)
+        os.replace(tmp_path, path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
 
 # ---------- Rename ----------
 
