@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import shutil
 import argparse
@@ -121,7 +122,7 @@ def convert_to_h264_mp4(path):
     return mp4_path, method
 
 # ---------- Burn timestamp ----------
-BACKUP_DIRNAME = ".originals"
+BACKUP_DIRNAME = "originals"
 
 def has_burn_backup(path, directory):
     return os.path.exists(os.path.join(directory, BACKUP_DIRNAME, os.path.basename(path)))
@@ -164,9 +165,9 @@ def burn_timestamp(path, dt):
     text = dt.strftime("%Y-%m-%d %H:%M")
     w, h = img.size
     base = min(w, h)
-    font_size = max(14, int(base * 0.03))
-    padding = max(10, int(base * 0.02))
-    stroke = max(1, font_size // 12)
+    font_size = max(20, int(base * 0.045))
+    padding = max(12, int(base * 0.022))
+    stroke = max(2, font_size // 10)
     font = _load_font(font_size)
 
     draw = ImageDraw.Draw(img)
@@ -187,6 +188,44 @@ def burn_timestamp(path, dt):
         save_kwargs["exif"] = exif_bytes
 
     img.save(path, **save_kwargs)
+
+# ---------- Filename timestamp safeguard ----------
+DATE_IN_NAME_RE = re.compile(
+    r"(?P<y>\d{4})[-_./:](?P<mo>\d{2})[-_./:](?P<d>\d{2})"
+    r"[ _T](?P<h>\d{2})[-_./:](?P<mi>\d{2})"
+    r"(?:[-_./:](?P<s>\d{2}))?"
+)
+
+def parse_date_from_filename(name):
+    base = os.path.splitext(name)[0]
+    m = DATE_IN_NAME_RE.search(base)
+    if not m:
+        return None
+    try:
+        s = int(m.group("s")) if m.group("s") else 0
+        return datetime(
+            int(m.group("y")), int(m.group("mo")), int(m.group("d")),
+            int(m.group("h")), int(m.group("mi")), s,
+        )
+    except ValueError:
+        return None
+
+def write_exif_datetime(path, dt):
+    """Write dt to DateTimeOriginal/Digitized/DateTime EXIF tags. JPEG/TIFF only."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".tiff"):
+        raise ValueError(f"EXIF write not supported for {ext}")
+    img = Image.open(path)
+    exif_bytes = img.info.get("exif")
+    if exif_bytes:
+        exif_dict = piexif.load(exif_bytes)
+    else:
+        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+    ts = dt.strftime("%Y:%m:%d %H:%M:%S").encode()
+    exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = ts
+    exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = ts
+    exif_dict["0th"][piexif.ImageIFD.DateTime] = ts
+    piexif.insert(piexif.dump(exif_dict), path)
 
 # ---------- Rename ----------
 
@@ -238,12 +277,44 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
         if ext not in IMAGE_EXTS and ext not in VIDEO_EXTS:
             continue
 
-        # Rename file using best available timestamp
-        dt, source = get_best_timestamp(path)
-        if shift_hours:
-            dt += timedelta(hours=shift_hours)
+        # Safeguard: if filename already contains a date, the file looks
+        # already-processed. Ask the user how to resolve.
+        skip_rename = False
+        filename_dt = parse_date_from_filename(name) if ext in IMAGE_EXTS else None
+        if filename_dt is not None:
+            exif_dt, exif_src = get_image_timestamp(path)
+            print(f"\n'{name}' already has a timestamp in its filename.")
+            print(f"  filename: {filename_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"  EXIF:     {exif_dt.strftime('%Y-%m-%d %H:%M:%S') if exif_dt else '(none)'}")
+            print("    [e] use EXIF timestamp (rename file)")
+            print("    [k] keep as is")
+            print("    [w] keep as is, write filename time into EXIF")
+            while True:
+                choice = input("  choose [e/k/w]: ").strip().lower()
+                if choice in ("e", "k", "w"):
+                    break
+            if choice == "e":
+                dt, source = (exif_dt, exif_src) if exif_dt else get_best_timestamp(path)
+                if shift_hours:
+                    dt += timedelta(hours=shift_hours)
+            elif choice == "w":
+                try:
+                    write_exif_datetime(path, filename_dt)
+                    print(f"  EXIF updated to {filename_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                except Exception as e:
+                    print(f"  EXIF write failed: {e}")
+                dt, source = filename_dt, "FilenameTimestamp"
+                skip_rename = True
+            else:  # 'k'
+                dt, source = filename_dt, "FilenameTimestamp"
+                skip_rename = True
+        else:
+            dt, source = get_best_timestamp(path)
+            if shift_hours:
+                dt += timedelta(hours=shift_hours)
+
         new_name = dt.strftime("%Y-%m-%d %H:%M:%S") + ext
-        if name != new_name:
+        if not skip_rename and name != new_name:
             final_name = safe_rename(path, new_name, directory)
             print(f"{name} → {final_name} [{source}]")
             path = os.path.join(directory, final_name)
