@@ -12,6 +12,7 @@ This Python script automatically renames your photos and videos based on their t
 - Converts `.MOV` → `.MP4` with **H.264 compression**  
 - Compresses videos while keeping them **QuickTime compatible**  
 - Automatically prevents filename collisions  
+- Optionally **burns the date/time into images** (bottom-right), with originals backed up to `.originals/`  
 
 ---
 
@@ -56,6 +57,16 @@ python rename_media.py /path/to/your/folder
 ```
 
 If no folder is provided, the script defaults to the current directory.
+
+### Burning the date onto images
+
+Add `--burn-date` to draw `YYYY-MM-DD HH:MM` into the bottom-right of each image, in place. Originals are first copied to `<folder>/.originals/`. You'll be asked to confirm before any image is modified; pass `-y` / `--yes` to skip the prompt.
+
+```bash
+python main.py /path/to/your/folder --burn-date
+```
+
+Re-running is safe: if a backup already exists in `.originals/` for a given filename, the burn step is skipped (no double-burn).
 
 Example output:
 
