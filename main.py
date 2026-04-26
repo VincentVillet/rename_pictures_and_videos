@@ -277,12 +277,14 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
         if ext not in IMAGE_EXTS and ext not in VIDEO_EXTS:
             continue
 
-        # Safeguard: if filename already contains a date, the file looks
-        # already-processed. Ask the user how to resolve.
+        # Safeguard: if filename already contains a date AND it disagrees with
+        # EXIF, the file looks already-processed with possibly stale metadata.
+        # Ask the user how to resolve. If filename and EXIF agree, proceed silently.
         skip_rename = False
         filename_dt = parse_date_from_filename(name) if ext in IMAGE_EXTS else None
-        if filename_dt is not None:
-            exif_dt, exif_src = get_image_timestamp(path)
+        exif_dt, exif_src = (get_image_timestamp(path) if filename_dt is not None else (None, None))
+        conflict = filename_dt is not None and exif_dt != filename_dt
+        if conflict:
             print(f"\n'{name}' already has a timestamp in its filename.")
             print(f"  filename: {filename_dt.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"  EXIF:     {exif_dt.strftime('%Y-%m-%d %H:%M:%S') if exif_dt else '(none)'}")
@@ -309,7 +311,10 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
                 dt, source = filename_dt, "FilenameTimestamp"
                 skip_rename = True
         else:
-            dt, source = get_best_timestamp(path)
+            if exif_dt is not None:
+                dt, source = exif_dt, exif_src
+            else:
+                dt, source = get_best_timestamp(path)
             if shift_hours:
                 dt += timedelta(hours=shift_hours)
 
