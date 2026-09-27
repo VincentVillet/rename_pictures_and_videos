@@ -20,6 +20,7 @@ This Python script automatically renames your photos and videos based on their t
 
 - Python 3.10+  
 - FFmpeg (must be installed and available in your PATH)  
+- ExifTool (used to read video recording dates, available in your PATH)  
 
 Install Python dependencies:
 
@@ -32,14 +33,14 @@ Install FFmpeg:
 macOS (Homebrew):
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg exiftool
 ```
 
 Ubuntu / Debian:
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg
+sudo apt install ffmpeg libimage-exiftool-perl
 ```
 
 Check FFmpeg is installed:
@@ -72,7 +73,7 @@ Example output:
 
 ```
 IMG_7133.MOV → IMG_7133.mp4 [H.264 compressed]
-IMG_7133.mp4 → 2025-07-17_09-42-11.mp4 [QuickTimeCreationTime]
+IMG_7133.mp4 → 2025-07-17_09-42-11.mp4 [AppleCreationDate]
 bff6-2de10b0d.mp4 → 2025-07-18_20-08-07.mp4 [FileModifyDate]
 IMG_9297.HEIC → 2025-07-19_14-22-30.heic [DateTimeOriginal]
 ```

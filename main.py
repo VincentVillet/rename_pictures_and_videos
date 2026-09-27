@@ -4,7 +4,7 @@ import json
 import shutil
 import argparse
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import piexif
 import pillow_heif
@@ -48,21 +48,45 @@ def get_image_timestamp(path):
         pass
     return None, None
 
+def parse_quicktime_datetime(value):
+    """Parse 'YYYY:MM:DD HH:MM:SS[...]' ignoring any timezone suffix."""
+    if not value or not isinstance(value, str) or value.startswith("0000"):
+        return None
+    try:
+        return datetime.strptime(value[:19], "%Y:%m:%d %H:%M:%S")
+    except ValueError:
+        return None
+
 def get_video_timestamp(path):
+    """Return the recording time as local wall-clock time (where it was filmed).
+
+    Apple's CreationDate / DateTimeOriginal already hold local time + offset,
+    so the offset is dropped as-is. QuickTime CreateDate is UTC with no zone
+    info (and is reset when a video is re-exported), so it's only a fallback,
+    converted to this machine's timezone.
+    """
     try:
         meta = run([
-            "ffprobe", "-v", "quiet",
-            "-print_format", "json",
-            "-show_entries", "format_tags=creation_time",
+            "exiftool", "-j", "-G1",
+            "-Keys:CreationDate", "-UserData:DateTimeOriginal", "-QuickTime:CreateDate",
             path
         ])
-        data = json.loads(meta)
-        ts = data.get("format", {}).get("tags", {}).get("creation_time")
-        if ts:
-            dt_utc = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            return dt_utc.astimezone().replace(tzinfo=None), "QuickTimeCreationTime"
+        tags = json.loads(meta)[0]
     except Exception:
-        pass
+        return None, None
+
+    for tag, label in [
+        ("Keys:CreationDate", "AppleCreationDate"),
+        ("UserData:DateTimeOriginal", "DateTimeOriginal"),
+    ]:
+        dt = parse_quicktime_datetime(tags.get(tag))
+        if dt:
+            return dt, label
+
+    dt = parse_quicktime_datetime(tags.get("QuickTime:CreateDate"))
+    if dt:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+        return dt_utc.astimezone().replace(tzinfo=None), "QuickTimeCreateDate (UTC)"
     return None, None
 
 def get_best_timestamp(path):
@@ -99,7 +123,9 @@ def convert_to_h264_mp4(path):
             "-preset", "fast",
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
-            "-movflags", "+faststart",
+            # use_metadata_tags keeps Apple's com.apple.quicktime.* keys
+            # (local CreationDate, GPS, device) in the MP4
+            "-movflags", "+faststart+use_metadata_tags",
             mp4_path
         ])
         method = "H.264 compressed"
@@ -111,7 +137,9 @@ def convert_to_h264_mp4(path):
             "-i", path,
             "-map", "0:v:0",
             "-map", "0:a?",
+            "-map_metadata", "0",
             "-c", "copy",
+            "-movflags", "use_metadata_tags",
             mp4_path
         ])
         method = "stream-copy fallback"
@@ -294,8 +322,11 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
 
         ext = os.path.splitext(name)[1].lower()
 
-        # Convert MOV and MP4 videos
+        # Convert MOV and MP4 videos. Read the timestamp from the original
+        # first, in case conversion loses metadata.
+        video_ts = (None, None)
         if ext in {".mov"}:
+            video_ts = get_video_timestamp(path)
             new_path, method = convert_to_h264_mp4(path)
             print(f"{name} → {os.path.basename(new_path)} [{method}]")
             path = new_path
@@ -349,6 +380,8 @@ def main(directory=".", shift_hours=0, burn_date=False, assume_yes=False):
         else:
             if exif_dt is not None:
                 dt, source = exif_dt, exif_src
+            elif video_ts[0] is not None:
+                dt, source = video_ts
             else:
                 dt, source = get_best_timestamp(path)
             if shift_hours:
